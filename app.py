@@ -250,10 +250,11 @@ def download_weights_file(url: str) -> Path:
     return cached_path
 
 
-def resolve_weights_file() -> tuple[Path | None, str | None]:
+def resolve_weights_file() -> tuple[Path | None, str | None, bool]:
+    """Resolve weights file. Returns (path, error, use_pretrained)."""
     local_path = APP_DIR / WEIGHTS_FILE
     if local_path.exists():
-        return local_path, None
+        return local_path, None, False
 
     configured_path = (
         os.environ.get("MODEL_WEIGHTS_PATH")
@@ -264,8 +265,8 @@ def resolve_weights_file() -> tuple[Path | None, str | None]:
     if configured_path:
         external_path = Path(configured_path).expanduser()
         if external_path.exists():
-            return external_path, None
-        return None, f"Configured model path does not exist: `{external_path}`"
+            return external_path, None, False
+        return None, f"Configured model path does not exist: `{external_path}`", False
 
     weights_url = (
         os.environ.get("MODEL_WEIGHTS_URL")
@@ -273,14 +274,12 @@ def resolve_weights_file() -> tuple[Path | None, str | None]:
     )
     if weights_url:
         try:
-            return download_weights_file(weights_url), None
+            return download_weights_file(weights_url), None, False
         except Exception as exc:
-            return None, f"Unable to download model weights from the configured URL: {exc}"
+            return None, f"Unable to download model weights from the configured URL: {exc}", False
 
-    return None, (
-        "Model weights were not found. Add `resnet_weights.weights.h5` to the app folder, "
-        "set `MODEL_WEIGHTS_PATH`, or configure `MODEL_WEIGHTS_URL` in Streamlit secrets."
-    )
+    # Fallback to using pre-trained ImageNet weights
+    return None, None, True
 
 CLASS_INFO = {
     'Glioma': {
@@ -899,12 +898,21 @@ st.markdown("---")
 
 # ── Load Model ────────────────────────────────────────────────────────────────
 @st.cache_resource
-def load_model(weights_path: str):
-    base_model = ResNet50(
-        weights=None,
-        include_top=False,
-        input_shape=(IMG_SIZE, IMG_SIZE, 3)
-    )
+def load_model(weights_path: str = None, use_pretrained: bool = False):
+    if use_pretrained:
+        # Use pre-trained ImageNet weights
+        base_model = ResNet50(
+            weights='imagenet',
+            include_top=False,
+            input_shape=(IMG_SIZE, IMG_SIZE, 3)
+        )
+    else:
+        base_model = ResNet50(
+            weights=None,
+            include_top=False,
+            input_shape=(IMG_SIZE, IMG_SIZE, 3)
+        )
+    
     model = models.Sequential([
         base_model,
         layers.GlobalAveragePooling2D(),
@@ -913,17 +921,29 @@ def load_model(weights_path: str):
         layers.Dense(len(CLASS_NAMES), activation='softmax')
     ])
     model.build((None, IMG_SIZE, IMG_SIZE, 3))
-    model.load_weights(weights_path)
+    
+    if weights_path and not use_pretrained:
+        model.load_weights(weights_path)
+    
     return model
 
-weights_path, weights_error = resolve_weights_file()
-if weights_path is None:
+weights_path, weights_error, use_pretrained = resolve_weights_file()
+
+if weights_error:
     st.error(weights_error)
     st.stop()
 
 try:
     with st.spinner('Loading AI model...'):
-        model = load_model(str(weights_path))
+        if use_pretrained:
+            model = load_model(use_pretrained=True)
+            st.info(
+                "⚠️ Using pre-trained ImageNet weights (no custom training data). "
+                "To use custom-trained weights for better accuracy, set MODEL_WEIGHTS_URL in Streamlit secrets or add resnet_weights.weights.h5 to the app folder.",
+                icon="ℹ️"
+            )
+        else:
+            model = load_model(str(weights_path))
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
