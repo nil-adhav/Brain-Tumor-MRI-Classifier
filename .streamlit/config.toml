@@ -1,0 +1,19 @@
+[client]
+showErrorDetails = true
+toolbarMode = "viewer"
+
+[logger]
+level = "info"
+
+[theme]
+primaryColor = "#0066cc"
+backgroundColor = "#0f1419"
+secondaryBackgroundColor = "#1a1f2e"
+textColor = "#e0e6f0"
+font = "sans serif"
+
+[server]
+headless = true
+runOnSave = true
+maxUploadSize = 200
+enableXsrfProtection = true
